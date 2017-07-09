@@ -18,10 +18,9 @@ Options:
 """
 from docopt import docopt
 from schema import Schema, And, Or, Use, SchemaError
+import requests
 
 from datetime import datetime
-
-import requests
 
 
 API_HOST = {
@@ -31,41 +30,42 @@ API_HOST = {
 
 
 def find_flight(date, from_, to, return_, shortest):
+    """
+    Generate and send request based on arguments for flight search
+    :return: booking token of flight
+    """
     payload = {
         'v': 3,
         'dateFrom': date,
         'dateTo': date,
         'flyFrom': from_,
         'to': to,
-        'affilid': 'picky'
+        'affilid': 'picky',
+        'typeFlight': 'return' if return_ else 'oneway',
+        'sort': 'duration' if shortest else 'price'
     }
-
     if return_:
         payload['daysInDestinationTo'] = return_
         payload['daysInDestinationFrom'] = return_
-        payload['typeFlight'] = 'return'
-    else:
-        payload['typeFlight'] = 'oneway'  # Default option
-
-    if shortest:
-        payload['sort'] = 'duration'
-    else:
-        payload['sort'] = 'price'  # Default option
 
     service_url = '{}/flights'.format(API_HOST['search'])
     resp = requests.get(service_url, params=payload)
 
-    # data = error_handling(resp)
-    data = resp.json()
-
-    if data['_results'] == 0:
-        raise Exception(
-            'Flights not found'
-        )
-    return data['data'][0]['booking_token']
+    try:
+        resp.raise_for_status()
+        data = resp.json()
+        if data['_results'] == 0:
+            raise Exception('Flights not found')
+        return data['data'][0]['booking_token']
+    except Exception as e:
+        exit(e)
 
 
 def book_flight(date, from_, to, return_, shortest):
+    """
+    Book flight
+    :return: PNR number
+    """
     save_book_payload = {
         "passengers": [
             {
@@ -84,30 +84,21 @@ def book_flight(date, from_, to, return_, shortest):
     service_url = '{}/booking'.format(API_HOST['booking'])
     resp = requests.post(service_url, json=save_book_payload)
 
-    # data = error_handling(resp)
-    data = resp.json()
-
-    if data['status'] == 'confirmed':
-        return data['pnr']
-    else:
-        raise Exception(
-            'Status: not confirmed'
-        )
-
-
-# def error_handling(resp):
-#     if resp.status_code == 200:
-#         return resp.json()
-#     else:
-#         raise Exception(
-#             'ERROR! Status code: {}, '
-#             'Content: {}'.format(resp.status_code, resp.content)
-#         )
+    try:
+        resp.raise_for_status()
+        data = resp.json()
+        if data['status'] == 'confirmed':
+            return data['pnr']
+        else:
+            raise Exception('Status: not confirmed')
+    except Exception as e:
+        exit(e)
 
 
 def main():
     arguments = docopt(__doc__, version='1.0.0')
 
+    #  Argument validation
     schema = Schema({
         '--date': And(str, lambda s: datetime.strptime(s, '%Y-%m-%d')),
         '--from': And(str, lambda s: len(s) == 3 and s.isalpha()),
@@ -122,17 +113,16 @@ def main():
     try:
         arguments = schema.validate(arguments)
     except SchemaError as e:
-        exit('{0}\n\n'
-             'book_flight.py -h or --help for help message'.format(e))
+        exit('{0}\n'
+             'book_flight.py --help or -h for help message'.format(e))
 
     dt = datetime.strptime(arguments['--date'], '%Y-%m-%d').strftime('%d/%m/%Y')
 
-    pnr = book_flight(date=dt,
-                      from_=arguments['--from'],
-                      to=arguments['--to'],
-                      return_=arguments['--return'],
-                      shortest=arguments['--shortest'])
-    return pnr
+    return book_flight(date=dt,
+                       from_=arguments['--from'],
+                       to=arguments['--to'],
+                       return_=arguments['--return'],
+                       shortest=arguments['--shortest'])
 
 if __name__ == '__main__':
     print('Your PNR number is:', main())
